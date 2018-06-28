@@ -463,6 +463,8 @@ class LIEF_API Binary : public LIEF::Binary {
   virtual LIEF::Binary::functions_t ctor_functions(void) const override;
   LIEF::Binary::functions_t dtor_functions(void) const;
 
+  std::vector<uint64_t> functions(void) const;
+
   //! @brief ``true`` if the binary embed notes
   bool has_notes(void) const;
 

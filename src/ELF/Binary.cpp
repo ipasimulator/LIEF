@@ -2192,6 +2192,42 @@ Relocation* Binary::get_relocation(const std::string& symbol_name) {
   return const_cast<Relocation*>(static_cast<const Binary*>(this)->get_relocation(symbol_name));
 }
 
+std::vector<uint64_t> Binary::functions(void) const {
+  std::set<uint64_t> functions;
+
+  static const auto expand_prel31 = [] (uint32_t word, uint32_t base) {
+    uint32_t offset = word & 0x7fffffff;
+    if (offset & 0x40000000) {
+      offset |= ~static_cast<uint32_t>(0x7fffffff);
+    }
+    return base + offset;
+  };
+
+  const Segment& exidx = this->get(SEGMENT_TYPES::PT_ARM_EXIDX);
+  const std::vector<uint8_t>& content = exidx.content();
+  const size_t nb_functions = content.size() / (2 * sizeof(uint32_t));
+  std::cout << "Nb functions: " << std::dec << nb_functions << std::endl;
+
+  const uint32_t* entries = reinterpret_cast<const uint32_t*>(content.data());
+  for (size_t i = 0; i < 2 * nb_functions; i += 2) {
+    uint32_t first_word  = entries[i];
+    uint32_t second_word = entries[i + 1];
+
+    //std::cout << std::hex << first_word << std::endl;
+    if ((first_word & 0x80000000) == 0) {
+      uint32_t prs_data = expand_prel31(first_word, exidx.virtual_address() + i * sizeof(uint32_t));
+      std::cout << std::hex << prs_data << std::endl;
+    }
+
+  }
+
+
+
+  return {std::make_move_iterator(std::begin(functions)), std::make_move_iterator(std::end(functions))};
+
+}
+
+
 // Operator+=
 // ==========
 Binary& Binary::operator+=(const DynamicEntry& entry) {
@@ -2280,6 +2316,8 @@ bool Binary::operator==(const Binary& rhs) const {
 bool Binary::operator!=(const Binary& rhs) const {
   return not (*this == rhs);
 }
+
+
 
 std::ostream& Binary::print(std::ostream& os) const {
 

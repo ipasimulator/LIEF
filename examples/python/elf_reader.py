@@ -414,6 +414,15 @@ def print_ctor(binary):
         print("    [{:d}] 0x{:x}".format(idx, address))
 
 
+@exceptions_handler(Exception)
+def print_functions(binary):
+    print("== Functions ==\n")
+
+    functions = binary.functions
+    print("Functions: ({:d})".format(len(functions)))
+    for idx, address in enumerate(functions):
+        print("    [{:d}] 0x{:x}".format(idx, address))
+
 
 def main():
     optparser = OptionParser(
@@ -498,6 +507,10 @@ def main():
             action='store_true', dest='show_ctor',
             help='Constructor functions')
 
+    optparser.add_option('--functions',
+            action='store_true', dest='show_functions',
+            help='List all function addresses found')
+
     options, args = optparser.parse_args()
 
     if options.help or len(args) == 0:
@@ -555,6 +568,9 @@ def main():
 
     if options.show_ctor or options.show_all:
         print_ctor(binary)
+
+    if options.show_functions:
+        print_functions(binary)
 
 
 
