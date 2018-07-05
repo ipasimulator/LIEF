@@ -2203,25 +2203,42 @@ std::vector<uint64_t> Binary::functions(void) const {
     return base + offset;
   };
 
-  const Segment& exidx = this->get(SEGMENT_TYPES::PT_ARM_EXIDX);
-  const std::vector<uint8_t>& content = exidx.content();
-  const size_t nb_functions = content.size() / (2 * sizeof(uint32_t));
-  std::cout << "Nb functions: " << std::dec << nb_functions << std::endl;
+  if (this->has(SEGMENT_TYPES::PT_ARM_EXIDX)) {
+    const Segment& exidx = this->get(SEGMENT_TYPES::PT_ARM_EXIDX);
+    const std::vector<uint8_t>& content = exidx.content();
+    const size_t nb_functions = content.size() / (2 * sizeof(uint32_t));
 
-  const uint32_t* entries = reinterpret_cast<const uint32_t*>(content.data());
-  for (size_t i = 0; i < 2 * nb_functions; i += 2) {
-    uint32_t first_word  = entries[i];
-    uint32_t second_word = entries[i + 1];
+    const uint32_t* entries = reinterpret_cast<const uint32_t*>(content.data());
+    for (size_t i = 0; i < 2 * nb_functions; i += 2) {
+      uint32_t first_word  = entries[i];
+      uint32_t second_word = entries[i + 1];
 
-    //std::cout << std::hex << first_word << std::endl;
-    if ((first_word & 0x80000000) == 0) {
-      uint32_t prs_data = expand_prel31(first_word, exidx.virtual_address() + i * sizeof(uint32_t));
-      std::cout << std::hex << prs_data << std::endl;
+      if ((first_word & 0x80000000) == 0) {
+        uint32_t prs_data = expand_prel31(first_word, exidx.virtual_address() + i * sizeof(uint32_t));
+        functions.insert(prs_data);
+      }
+
     }
-
   }
 
+  LIEF::Binary::functions_t ctors = this->ctor_functions();
+  LIEF::Binary::functions_t dtors = this->dtor_functions();
 
+  std::move(
+      std::begin(ctors),
+      std::end(ctors),
+      std::inserter(functions, std::end(functions)));
+
+  std::move(
+      std::begin(dtors),
+      std::end(dtors),
+      std::inserter(functions, std::end(functions)));
+
+  for (const Symbol& s : this->symbols()) {
+    if (s.type() == ELF_SYMBOL_TYPES::STT_FUNC and s.value() > 0) {
+      functions.insert(s.value());
+    }
+  }
 
   return {std::make_move_iterator(std::begin(functions)), std::make_move_iterator(std::end(functions))};
 
