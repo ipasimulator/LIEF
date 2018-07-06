@@ -2240,7 +2240,7 @@ std::vector<uint64_t> Binary::functions(void) const {
     }
   }
 
-  return {std::make_move_iterator(std::begin(functions)), std::make_move_iterator(std::end(functions))};
+  return {std::begin(functions), std::end(functions)};
 
 }
 
