@@ -16,6 +16,262 @@
 namespace LIEF {
 namespace PE {
 
+/*********************************
+
+          PE Import
+
+    +-----------------------+
+    | ILT RVA               | --+
+    +-----------------------+   |
+    | Name RVA              |   |
+    +-----------------------+   |
+ ---| IAT RVA               |   |
+ |  +-----------------------+   |
+ |  |                       |   |
+ |  |                       |   |
+ |  |                       |   |
+ |  +-----------------------+   |
+ |  | 000000000000000000000 |   |
+ |  +-----------------------+   |
+ |                              |
+ |   +---- Ordinal Flag         |
+ |   v                          |
+ |  +-+---------------------+ <-+-------- ILT
+ |  | | Hint/Name RVA       |---+
+ |  +-+---------------------+   |
+ |  | | ....                |   |
+ |  +-+---------------------+   |
+ |                              |
+ |            IAT               |
+ +->+-+---------------------+   |
+    | | Same Value as ILT[0]|   |
+    +-+---------------------+   |
+    | |                     |   |
+    +-+---------------------+   |
+                                |
+                                |
+    +---+---------------+---+   |
+    | 9 | LoadLibrary   | 0 | <-+
+    +---+---------------+---+
+      ^         ^         ^
+      |         |         |
+     Hint      Name     Padding
+
+*********************************/
+
+
+
+
+template<typename PE_T>
+void Builder::build_import_table(void) {
+  using uint__ = typename PE_T::uint;
+
+  /**************************************
+
+   +----------------------------------+
+   | pe_import[0]                     |
+   +----------------------------------+
+   | pe_import[1]                     |
+   +----------------------------------+
+   |                                  |
+   | Import Lookup Tables             |
+   |                                  |
+   +----------------------------------+
+   | Library Names                    |
+   +----------------------------------+
+   |                                  |
+   | Hint/Names table                 |
+   |                                  |
+   +----------------------------------+
+   |                                  |
+   |                                  |
+   | New IAT (For new imports)        |
+   |                                  |
+   |                                  |
+   +----------------------------------+
+
+  **************************************/
+
+  it_imports imports = this->binary_->imports();
+
+  uint32_t import_table_size  = static_cast<uint32_t>((imports.size() + 1) * sizeof(pe_import)); // +1 for the null entry
+  uint32_t ilt_size           = 0;
+  uint32_t library_names_size = 0;
+  uint32_t hint_name_sizes    = 0;
+  uint32_t new_iat_size       = 0;
+  for (const Import& import : imports) {
+
+    library_names_size  += import.name().size() + 1;
+    ilt_size            += (import.entries().size() + 1) * sizeof(uint__);
+
+    // Added by the user
+    if (import.import_address_table_rva() == 0) {
+      new_iat_size += (import.entries().size() + 1) * sizeof(uint__);
+    }
+
+    for (const ImportEntry& entry : import.entries()) {
+      if (not entry.is_ordinal()) {
+        hint_name_sizes += sizeof(uint16_t) + entry.name().size() + 1;
+        hint_name_sizes += hint_name_sizes % 2;
+      }
+
+    }
+  }
+  uint32_t import_table_offset  = 0;
+  uint32_t ilt_offset           = import_table_offset + import_table_size;
+  uint32_t library_names_offset = ilt_offset + ilt_size;
+  uint32_t hint_names_offset    = library_names_offset + library_names_size;
+  uint32_t new_iat_offset       = hint_names_offset + hint_name_sizes;
+  uint32_t end_off              = new_iat_offset + new_iat_size;
+
+
+  std::vector<uint8_t> new_imports(end_off, 0);
+  size_t content_size_aligned = align(new_imports.size(), this->binary_->optional_header().file_alignment());
+  new_imports.insert(std::end(new_imports), content_size_aligned - new_imports.size(), 0);
+
+  // Create a new section to handle imports
+  Section new_import_section{".l" + std::to_string(static_cast<uint32_t>(DATA_DIRECTORY::IMPORT_TABLE))};
+  new_import_section.content(new_imports);
+
+  new_import_section.add_characteristic(SECTION_CHARACTERISTICS::IMAGE_SCN_CNT_CODE);
+
+  auto&& it_import_section = std::find_if(
+      std::begin(this->binary_->sections_),
+      std::end(this->binary_->sections_),
+      [] (const Section* section) {
+        return section != nullptr and section->is_type(PE_SECTION_TYPES::IMPORT);
+      });
+
+  // Remove 'import' type from the original section
+  if (it_import_section != std::end(this->binary_->sections_)) {
+    (*it_import_section)->remove_type(PE_SECTION_TYPES::IMPORT);
+  }
+
+  Section& import_section = this->binary_->add_section(new_import_section, PE_SECTION_TYPES::IMPORT);
+
+
+  // Process libraries
+  for (const Import& import : imports) {
+    uint__ iat_rva = import.import_address_table_rva();
+    if (import.import_address_table_rva() == 0) {
+      iat_rva = import_section.virtual_address() + new_iat_offset;
+    }
+    // Header
+    pe_import header;
+    header.ImportLookupTableRVA  = static_cast<uint__>(import_section.virtual_address() + ilt_offset);
+    header.TimeDateStamp         = static_cast<uint32_t>(import.timedatestamp());
+    header.ForwarderChain        = static_cast<uint32_t>(import.forwarder_chain());
+    header.NameRVA               = static_cast<uint__>(import_section.virtual_address() + library_names_offset);
+    header.ImportAddressTableRVA = static_cast<uint__>(iat_rva);
+
+    // Copy the header in the "header section"
+    std::copy(
+        reinterpret_cast<uint8_t*>(&header),
+        reinterpret_cast<uint8_t*>(&header) + sizeof(pe_import),
+        new_imports.data() + import_table_offset);
+
+    import_table_offset += sizeof(pe_import);
+
+    // Copy the name in the "string section"
+    const std::string& import_name = import.name();
+    std::copy(
+        std::begin(import_name),
+        std::end(import_name),
+        new_imports.data() + library_names_offset);
+
+    library_names_offset += import_name.size() + 1; // +1 for '\0'
+    uint__ ilt_value = 0;
+    // Process imported functions
+    for (const ImportEntry& entry : import.entries()) {
+      // Default: ordinal case
+      ilt_value = entry.data();
+
+      if (not entry.is_ordinal()) {
+        ilt_value = import_section.virtual_address() + hint_names_offset;
+
+        // Insert entry in hint/name table
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        // First: hint
+        const uint16_t hint = entry.hint();
+
+        std::copy(
+            reinterpret_cast<const uint8_t*>(&hint),
+            reinterpret_cast<const uint8_t*>(&hint) + sizeof(uint16_t),
+            new_imports.data() + hint_names_offset); //hintIdx
+
+        hint_names_offset += sizeof(uint16_t);
+
+        // Then: name
+        const std::string& name = entry.name();
+        std::copy(
+            std::begin(name),
+            std::end(name),
+            new_imports.data() + hint_names_offset);
+
+        hint_names_offset += name.size() + 1; // +1 for \0
+        hint_names_offset += hint_names_offset % 2; //Require to be even
+      } // is_ordinal
+
+      // Write ILT Value
+      std::copy(
+        reinterpret_cast<const uint8_t*>(&ilt_value),
+        reinterpret_cast<const uint8_t*>(&ilt_value) + sizeof(uint__),
+        new_imports.data() + ilt_offset);
+
+      // Patch IAT value
+      if (import.import_address_table_rva() == 0) {
+        uint32_t off = iat_rva - import_section.virtual_address();
+
+        std::copy(
+          reinterpret_cast<const uint8_t*>(&ilt_value),
+          reinterpret_cast<const uint8_t*>(&ilt_value) + sizeof(uint__),
+          new_imports.data() + off);
+        new_iat_offset += sizeof(uint__);
+      } else {
+        this->binary_->patch_address(iat_rva, ilt_value, sizeof(uint__), LIEF::Binary::VA_TYPES::RVA);
+      }
+
+      ilt_offset += sizeof(uint__);
+      iat_rva    += sizeof(uint__);
+    } // </end> ImportEntry iterator
+
+    // Null value at the end
+    ilt_value = 0;
+
+    std::copy(
+      reinterpret_cast<const uint8_t*>(&ilt_value),
+      reinterpret_cast<const uint8_t*>(&ilt_value) + sizeof(uint__),
+      new_imports.data() + ilt_offset);
+
+    // Patch IAT value
+    if (import.import_address_table_rva() == 0) {
+      uint32_t off = iat_rva - import_section.virtual_address();
+
+      std::copy(
+        reinterpret_cast<const uint8_t*>(&ilt_value),
+        reinterpret_cast<const uint8_t*>(&ilt_value) + sizeof(uint__),
+        new_imports.data() + off);
+      new_iat_offset += sizeof(uint__);
+    } else {
+      this->binary_->patch_address(iat_rva, ilt_value, sizeof(uint__), LIEF::Binary::VA_TYPES::RVA);
+    }
+    ilt_offset += sizeof(uint__);
+    iat_rva    += sizeof(uint__);
+
+  } // </end> Import Iterator
+
+  // Insert null entry at the end
+  std::fill(
+    new_imports.data() + import_table_offset,
+    new_imports.data() + import_table_offset + sizeof(pe_import),
+    0);
+
+  import_table_offset += sizeof(pe_import);
+  import_section.content(std::move(new_imports));
+
+}
+
 template<typename PE_T>
 std::vector<uint8_t> Builder::build_jmp(uint64_t from, uint64_t address) {
   std::vector<uint8_t> instruction;
@@ -63,286 +319,6 @@ std::vector<uint8_t> Builder::build_jmp_hook(uint64_t from, uint64_t address) {
 }
 
 
-/*
-         Original IAT                        New IAT
-     +------------------+             +------------------+
-     |Trampoline 1 addr |------+      |   new address 1  |-+
-     +------------------+      |      +------------------+ |
-     |Trampoline 2 addr |      |      |   new address 1  | |
-     +------------------+      |      +------------------+ |
-     |Trampoline 3 addr |      |      |   new address 1  | |
-     +------------------+      |      +------------------+ |
-                               |                           |
-                               |        Trampoline 1    +--+
-                               |      +-----------------v-----+             Kernel32.dll
-                               +----->|  mov rax, [new addr1] |           +--------------+
-                                      |  jmp rax              |---------->| GetLocalTime |
-                                      +-----------------------+           +--------------+
-                                                                     +--->|  LocalSize   |
-                                        Trampoline 2                 |    +--------------+
-                                      +-----------------------+      |    |  WriteFile   |
-                                      |  mov rax, [new addr2] |      |    +--------------+
-                                      |  jmp rax              |------+
-                                      +-----------------------+
-
-*/
-
-template<typename PE_T>
-void Builder::build_import_table(void) {
-  using uint__ = typename PE_T::uint;
-
-  // Compute size of the the diffrent (sub)sections
-  // inside the future import section
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  // Size of pe_import + 1 for the null entry
-  uint32_t import_table_size  = static_cast<uint32_t>((this->binary_->imports().size() + 1) * sizeof(pe_import)); // +1 for the null entry
-
-  // Size of import entries
-  uint32_t entries_size = 0;
-
-  // Size of the section which will holds imported functions names
-  uint32_t functions_name_size = 0;
-
-  // Size of the section which will holds library name (e.g. kernel32.dll)
-  uint32_t libraries_name_size = 0;
-
-  // Size of the trampoline section
-  uint32_t trampolines_size = 0;
-
-  // Size of the instructions in the trampoline
-  uint32_t trampoline_size = build_jmp<PE_T>(0, 0).size();
-
-  // Compute size of each imports's sections
-  for (const Import& import : this->binary_->imports()) {
-    for (const ImportEntry& entry : import.entries()) {
-
-      functions_name_size += 2 + entry.name().size() + 1; // [Hint] [Name\0]
-      functions_name_size += functions_name_size % 2;     // [padding]
-    }
-
-    libraries_name_size  += import.name().size() + 1; // [Name\0]
-    entries_size += 2 * (import.entries().size() + 1) * sizeof(uint__); // Once for Lookup table and the other for Import Address Table (IAT). +1 for the null entry
-    trampolines_size    += import.entries().size() * trampoline_size;
-  }
-
-  // Offset of the diffrents sections inside *import section*
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  // Offset to the import table (i.e list of pe_import)
-  uint32_t import_table_offset = 0;
-
-  // Offset to the lookup table: After import table
-  uint32_t lookuptable_offset = import_table_offset + import_table_size;
-
-  // Address table (IAT). Identical to the lookup table until the library is bound
-  uint32_t iat_offset = lookuptable_offset + entries_size / 2;
-
-  // Offset to the section which will contains hints/names of the imported functions name
-  uint32_t functions_name_offset = iat_offset + entries_size / 2;
-
-  // Offset of the section which will holds libraries name
-  uint32_t libraries_name_offset = functions_name_offset + functions_name_size;
-
-  // Offset of the section where trampolines will be written
-  uint32_t trampolines_offset = libraries_name_offset + libraries_name_size;
-
-  // Create empty content of the required size and align it
-  std::vector<uint8_t> content(trampolines_offset + trampolines_size, 0);
-  size_t content_size_aligned = align(content.size(), this->binary_->optional_header().file_alignment());
-  content.insert(std::end(content), content_size_aligned - content.size(), 0);
-
-  // Create a new section to handle imports
-  Section new_import_section{".l" + std::to_string(static_cast<uint32_t>(DATA_DIRECTORY::IMPORT_TABLE))};
-  new_import_section.content(content);
-
-  new_import_section.add_characteristic(SECTION_CHARACTERISTICS::IMAGE_SCN_CNT_CODE);
-
-  auto&& it_import_section = std::find_if(
-      std::begin(this->binary_->sections_),
-      std::end(this->binary_->sections_),
-      [] (const Section* section) {
-        return section != nullptr and section->is_type(PE_SECTION_TYPES::IMPORT);
-      });
-
-  // Remove 'import' type from the original section
-  if (it_import_section != std::end(this->binary_->sections_)) {
-    (*it_import_section)->remove_type(PE_SECTION_TYPES::IMPORT);
-  }
-
-  // As add_section will change DATA_DIRECTORY::IMPORT_TABLE we have to save it before
-  uint32_t offset_imports  = this->binary_->rva_to_offset(this->binary_->data_directory(DATA_DIRECTORY::IMPORT_TABLE).RVA());
-  Section& import_section = this->binary_->add_section(new_import_section, PE_SECTION_TYPES::IMPORT);
-
-
-  // Patch the original IAT with the address of the associated trampoline
-  if (this->patch_imports_) {
-    Section& original_import = this->binary_->section_from_offset(offset_imports);
-    std::vector<uint8_t> import_content  = original_import.content();
-    uint32_t roffset_import = offset_imports - original_import.offset();
-
-    pe_import *import_header = reinterpret_cast<pe_import*>(import_content.data() + roffset_import);
-    uint32_t jumpOffsetTmp = trampolines_offset;
-    while (import_header->ImportAddressTableRVA != 0) {
-      uint32_t offsetTable = this->binary_->rva_to_offset(import_header->ImportLookupTableRVA)  - original_import.pointerto_raw_data();
-      uint32_t offsetIAT   = this->binary_->rva_to_offset(import_header->ImportAddressTableRVA) - original_import.pointerto_raw_data();
-      if (offsetTable > import_content.size() or offsetIAT > import_content.size()) {
-        //TODO: Better handle
-        LOG(ERROR) << "Can't patch" << std::endl;
-        break;
-      }
-      uint__ *lookupTable = reinterpret_cast<uint__*>(import_content.data() + offsetTable);
-      uint__ *IAT         = reinterpret_cast<uint__*>(import_content.data() + offsetIAT);
-
-      while (*lookupTable != 0) {
-        *IAT = static_cast<uint__>(this->binary_->optional_header().imagebase() + import_section.virtual_address() + jumpOffsetTmp);
-        *lookupTable = *IAT;
-        jumpOffsetTmp += trampoline_size;
-
-        lookupTable++;
-        IAT++;
-      }
-      import_header++;
-    }
-    original_import.content(import_content);
-  }
-
-  // Process libraries
-  for (const Import& import : this->binary_->imports()) {
-    // Header
-    pe_import header;
-    header.ImportLookupTableRVA  = static_cast<uint__>(import_section.virtual_address() + lookuptable_offset);
-    header.TimeDateStamp         = static_cast<uint32_t>(import.timedatestamp());
-    header.ForwarderChain        = static_cast<uint32_t>(import.forwarder_chain());
-    header.NameRVA               = static_cast<uint__>(import_section.virtual_address() + libraries_name_offset);
-    header.ImportAddressTableRVA = static_cast<uint__>(import_section.virtual_address() + iat_offset);
-
-    // Copy the header in the "header section"
-    std::copy(
-        reinterpret_cast<uint8_t*>(&header),
-        reinterpret_cast<uint8_t*>(&header) + sizeof(pe_import),
-        content.data() + import_table_offset);
-
-    import_table_offset += sizeof(pe_import);
-
-    // Copy the name in the "string section"
-    const std::string& import_name = import.name();
-    std::copy(
-        std::begin(import_name),
-        std::end(import_name),
-        content.data() + libraries_name_offset);
-
-    libraries_name_offset += import_name.size() + 1; // +1 for '\0'
-
-    // Process imported functions
-    for (const ImportEntry& entry : import.entries()) {
-
-      // If patch is enabled, we have to create a trampoline for this function
-      if (this->patch_imports_) {
-        std::vector<uint8_t> instructions;
-        uint64_t address = this->binary_->optional_header().imagebase() + import_section.virtual_address() + iat_offset;
-        if (this->binary_->hooks_.count(import_name) > 0 and this->binary_->hooks_[import_name].count(entry.name())) {
-          address = this->binary_->hooks_[import_name][entry.name()];
-          instructions = Builder::build_jmp_hook<PE_T>(this->binary_->optional_header().imagebase() + import_section.virtual_address() + trampolines_offset, address);
-        } else {
-          instructions = Builder::build_jmp<PE_T>(this->binary_->optional_header().imagebase() + import_section.virtual_address() + trampolines_offset, address);
-        }
-        std::copy(
-            std::begin(instructions),
-            std::end(instructions),
-            content.data() + trampolines_offset);
-
-        trampolines_offset += trampoline_size;
-      }
-
-      // Default: ordinal case
-      uint__ lookup_table_value = entry.data();
-
-      if (not entry.is_ordinal()) {
-
-        lookup_table_value = import_section.virtual_address() + functions_name_offset;
-
-        // Insert entry in hint/name table
-        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        // First: hint
-        const uint16_t hint = entry.hint();
-        std::copy(
-            reinterpret_cast<const uint8_t*>(&hint),
-            reinterpret_cast<const uint8_t*>(&hint) + sizeof(uint16_t),
-            content.data() + functions_name_offset); //hintIdx
-
-        functions_name_offset += sizeof(uint16_t);
-
-        // Then: name
-        const std::string& name = entry.name();
-        std::copy(
-            std::begin(name),
-            std::end(name),
-            content.data() + functions_name_offset);
-
-        functions_name_offset += name.size() + 1; // +1 for \0
-
-        functions_name_offset += functions_name_offset % 2; //Require to be even
-      }
-
-      uint__ iat_value = 0;
-
-      // Check if manually set
-      if (entry.data() != entry.iat_value() and entry.iat_value() > 0) {
-        iat_value = entry.iat_value();
-      } else { // default value same that in the lookup table
-        iat_value = lookup_table_value;
-      }
-
-      // Insert entry in lookup table and address table
-      std::copy(
-        reinterpret_cast<const uint8_t*>(&lookup_table_value),
-        reinterpret_cast<const uint8_t*>(&lookup_table_value) + sizeof(uint__),
-        content.data() + lookuptable_offset);
-
-      std::copy(
-        reinterpret_cast<const uint8_t*>(&iat_value),
-        reinterpret_cast<const uint8_t*>(&iat_value) + sizeof(uint__),
-        content.data() + iat_offset);
-
-      lookuptable_offset += sizeof(uint__);
-      iat_offset += sizeof(uint__);
-
-    }
-
-    // Insert null entry at the end
-    std::fill(
-      content.data() + lookuptable_offset,
-      content.data() + lookuptable_offset + sizeof(uint__),
-      0);
-
-    std::fill(
-      content.data() + iat_offset,
-      content.data() + iat_offset + sizeof(uint__),
-      0);
-
-    lookuptable_offset  += sizeof(uint__);
-    iat_offset += sizeof(uint__);
-
-  }
-
-  // Insert null entry at the end
-  std::fill(
-    content.data() + import_table_offset,
-    content.data() + import_table_offset + sizeof(pe_import),
-    0);
-
-  import_table_offset += sizeof(pe_import);
-
-  // Fill the section
-  import_section.content(content);
-
-  // Update IAT data directory
-  const uint32_t rva = static_cast<uint32_t>(import_section.virtual_address() + iat_offset);
-  this->binary_->data_directory(DATA_DIRECTORY::IAT).RVA(rva);
-  this->binary_->data_directory(DATA_DIRECTORY::IAT).size(functions_name_offset - iat_offset + 1);
-}
 
 template<typename PE_T>
 void Builder::build_optional_header(const OptionalHeader& optional_header) {

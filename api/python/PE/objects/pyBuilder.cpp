@@ -42,14 +42,6 @@ void create<Builder>(py::module& m) {
         py::arg("enable") = true,
         py::return_value_policy::reference)
 
-    .def("patch_imports",
-        &Builder::patch_imports,
-        "Patch the original import table in order to redirect functions to "
-        "the new import table.\n\n"
-        "This setting should be used with ``build_imports`` set to ``True``",
-        py::arg("enable") = true,
-        py::return_value_policy::reference)
-
     .def("build_relocations",
         &Builder::build_relocations,
         "Rebuild the relocation table in another section",

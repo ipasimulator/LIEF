@@ -63,12 +63,6 @@ class LIEF_API Builder
     //! @brief Rebuild the import table in another section
     Builder& build_imports(bool flag = true);
 
-    //! @brief Patch the original import table in order to
-    //! redirect functions to the new import table.
-    //!
-    //! This setting should be used with LIEF::PE::Builder::build_imports set to ``true``
-    Builder& patch_imports(bool flag = true);
-
     //! @brief Rebuild the relocation table in another section
     Builder& build_relocations(bool flag = true);
 
@@ -102,9 +96,6 @@ class LIEF_API Builder
     template<typename PE_T>
     void build_optional_header(const OptionalHeader& optional_header);
 
-
-    //! @brief Rebuild Import Table
-    // TODO: Bug with x86
     template<typename PE_T>
     void build_import_table(void);
 
@@ -138,7 +129,6 @@ class LIEF_API Builder
     Binary                 *binary_;
 
     bool build_imports_;
-    bool patch_imports_;
     bool build_relocations_;
     bool build_tls_;
     bool build_resources_;

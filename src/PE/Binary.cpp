@@ -181,7 +181,6 @@ void Binary::write(const std::string& filename) {
 
   builder.
     build_imports(false).
-    patch_imports(false).
     build_relocations(false).
     build_tls(false).
     build_resources(true);

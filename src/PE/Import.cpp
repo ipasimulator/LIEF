@@ -37,7 +37,8 @@ Import::Import(const Import& other) :
   name_RVA_{other.name_RVA_},
   import_address_table_RVA_{other.import_address_table_RVA_},
   name_{other.name_},
-  type_{other.type_}
+  type_{other.type_},
+  original_number_of_entries_{0}
 {}
 
 
@@ -47,16 +48,17 @@ Import& Import::operator=(Import other) {
 }
 
 void Import::swap(Import& other) {
-  std::swap(this->entries_,                  other.entries_);
-  std::swap(this->directory_,                other.directory_);
-  std::swap(this->iat_directory_,            other.iat_directory_);
-  std::swap(this->import_lookup_table_RVA_,  other.import_lookup_table_RVA_);
-  std::swap(this->timedatestamp_,            other.timedatestamp_);
-  std::swap(this->forwarder_chain_,          other.forwarder_chain_);
-  std::swap(this->name_RVA_,                 other.name_RVA_);
-  std::swap(this->import_address_table_RVA_, other.import_address_table_RVA_);
-  std::swap(this->name_,                     other.name_);
-  std::swap(this->type_,                     other.type_);
+  std::swap(this->entries_,                    other.entries_);
+  std::swap(this->directory_,                  other.directory_);
+  std::swap(this->iat_directory_,              other.iat_directory_);
+  std::swap(this->import_lookup_table_RVA_,    other.import_lookup_table_RVA_);
+  std::swap(this->timedatestamp_,              other.timedatestamp_);
+  std::swap(this->forwarder_chain_,            other.forwarder_chain_);
+  std::swap(this->name_RVA_,                   other.name_RVA_);
+  std::swap(this->import_address_table_RVA_,   other.import_address_table_RVA_);
+  std::swap(this->name_,                       other.name_);
+  std::swap(this->type_,                       other.type_);
+  std::swap(this->original_number_of_entries_, other.original_number_of_entries_);
 }
 
 Import::Import(void) :
@@ -69,8 +71,8 @@ Import::Import(void) :
   name_RVA_{0},
   import_address_table_RVA_{0},
   name_{""},
-  type_{PE_TYPE::PE32} // Arbitrary value
-
+  type_{PE_TYPE::PE32}, // Arbitrary value
+  original_number_of_entries_{0}
 {}
 
 Import::Import(const pe_import *import) :
@@ -83,7 +85,8 @@ Import::Import(const pe_import *import) :
   name_RVA_(import->NameRVA),
   import_address_table_RVA_(import->ImportAddressTableRVA),
   name_{""},
-  type_{PE_TYPE::PE32} // Arbitrary value
+  type_{PE_TYPE::PE32}, // Arbitrary value
+  original_number_of_entries_{0}
 {}
 
 
@@ -97,7 +100,8 @@ Import::Import(const std::string& name) :
   name_RVA_{0},
   import_address_table_RVA_{0},
   name_{name},
-  type_{PE_TYPE::PE32} // Arbitrary value
+  type_{PE_TYPE::PE32}, // Arbitrary value
+  original_number_of_entries_{0}
 {}
 
 

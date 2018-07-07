@@ -358,6 +358,7 @@ void Parser::parse_import_table(void) {
         table = 0;
       }
     }
+    import.original_number_of_entries_ = import.entries_.size();
     this->binary_->imports_.push_back(std::move(import));
   }
 

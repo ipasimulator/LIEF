@@ -119,8 +119,8 @@ class LIEF_API Import : public Object {
 
   private:
   import_entries_t entries_;
-  DataDirectory*   directory_;
-  DataDirectory*   iat_directory_;
+  DataDirectory*   directory_{nullptr};
+  DataDirectory*   iat_directory_{nullptr};
   uint32_t         import_lookup_table_RVA_;
   uint32_t         timedatestamp_;
   uint32_t         forwarder_chain_;
@@ -128,6 +128,9 @@ class LIEF_API Import : public Object {
   uint32_t         import_address_table_RVA_;
   std::string      name_;
   PE_TYPE          type_;
+
+  size_t           original_number_of_entries_{0};
+
 };
 
 }
