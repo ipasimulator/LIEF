@@ -121,7 +121,7 @@ void Builder::build_import_table(void) {
   uint32_t ilt_offset           = import_table_offset + import_table_size;
   uint32_t library_names_offset = ilt_offset + ilt_size;
   uint32_t hint_names_offset    = library_names_offset + library_names_size;
-  uint32_t new_iat_offset       = hint_names_offset + hint_name_sizes;
+  uint32_t new_iat_offset       = align(hint_names_offset + hint_name_sizes, 4);
   uint32_t end_off              = new_iat_offset + new_iat_size;
 
 
@@ -133,7 +133,7 @@ void Builder::build_import_table(void) {
   Section new_import_section{".l" + std::to_string(static_cast<uint32_t>(DATA_DIRECTORY::IMPORT_TABLE))};
   new_import_section.content(new_imports);
 
-  new_import_section.add_characteristic(SECTION_CHARACTERISTICS::IMAGE_SCN_CNT_CODE);
+  //new_import_section.add_characteristic(SECTION_CHARACTERISTICS::IMAGE_SCN_CNT_CODE);
 
   auto&& it_import_section = std::find_if(
       std::begin(this->binary_->sections_),
@@ -152,17 +152,19 @@ void Builder::build_import_table(void) {
 
   // Process libraries
   for (const Import& import : imports) {
-    uint__ iat_rva = import.import_address_table_rva();
+    uint32_t iat_rva = import.import_address_table_rva();
+
+    // If IAT is 0 it means that it's a user import
     if (import.import_address_table_rva() == 0) {
       iat_rva = import_section.virtual_address() + new_iat_offset;
     }
     // Header
     pe_import header;
-    header.ImportLookupTableRVA  = static_cast<uint__>(import_section.virtual_address() + ilt_offset);
+    header.ImportLookupTableRVA  = static_cast<uint32_t>(import_section.virtual_address() + ilt_offset);
     header.TimeDateStamp         = static_cast<uint32_t>(import.timedatestamp());
     header.ForwarderChain        = static_cast<uint32_t>(import.forwarder_chain());
-    header.NameRVA               = static_cast<uint__>(import_section.virtual_address() + library_names_offset);
-    header.ImportAddressTableRVA = static_cast<uint__>(iat_rva);
+    header.NameRVA               = static_cast<uint32_t>(import_section.virtual_address() + library_names_offset);
+    header.ImportAddressTableRVA = static_cast<uint32_t>(iat_rva);
 
     // Copy the header in the "header section"
     std::copy(
@@ -181,6 +183,7 @@ void Builder::build_import_table(void) {
 
     library_names_offset += import_name.size() + 1; // +1 for '\0'
     uint__ ilt_value = 0;
+
     // Process imported functions
     for (const ImportEntry& entry : import.entries()) {
       // Default: ordinal case
