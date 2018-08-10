@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <map>
 namespace LIEF {
 namespace PE {
 
@@ -64,7 +65,8 @@ namespace PE {
 
 template<typename PE_T>
 void Builder::build_import_table(void) {
-  using uint__ = typename PE_T::uint;
+  using uint__    = typename PE_T::uint;
+  using patches_t = std::map<uint__, uint__>;
 
   /**************************************
 
@@ -93,6 +95,7 @@ void Builder::build_import_table(void) {
   **************************************/
 
   it_imports imports = this->binary_->imports();
+  patches_t iat_patches;
 
   uint32_t import_table_size  = static_cast<uint32_t>((imports.size() + 1) * sizeof(pe_import)); // +1 for the null entry
   uint32_t ilt_size           = 0;
@@ -176,6 +179,7 @@ void Builder::build_import_table(void) {
 
     // Copy the name in the "string section"
     const std::string& import_name = import.name();
+    std::cout << import_name << std::endl;
     std::copy(
         std::begin(import_name),
         std::end(import_name),
@@ -207,6 +211,7 @@ void Builder::build_import_table(void) {
 
         // Then: name
         const std::string& name = entry.name();
+        std::cout << name << std::endl;
         std::copy(
             std::begin(name),
             std::end(name),
@@ -232,7 +237,8 @@ void Builder::build_import_table(void) {
           new_imports.data() + off);
         new_iat_offset += sizeof(uint__);
       } else {
-        this->binary_->patch_address(iat_rva, ilt_value, sizeof(uint__), LIEF::Binary::VA_TYPES::RVA);
+
+        iat_patches.emplace(iat_rva, ilt_value);
       }
 
       ilt_offset += sizeof(uint__);
@@ -257,7 +263,7 @@ void Builder::build_import_table(void) {
         new_imports.data() + off);
       new_iat_offset += sizeof(uint__);
     } else {
-      this->binary_->patch_address(iat_rva, ilt_value, sizeof(uint__), LIEF::Binary::VA_TYPES::RVA);
+      iat_patches.emplace(iat_rva, ilt_value);
     }
     ilt_offset += sizeof(uint__);
     iat_rva    += sizeof(uint__);
@@ -272,6 +278,10 @@ void Builder::build_import_table(void) {
 
   import_table_offset += sizeof(pe_import);
   import_section.content(std::move(new_imports));
+
+  for (auto&& p : iat_patches) {
+      this->binary_->patch_address(p.first, p.second, sizeof(uint__), LIEF::Binary::VA_TYPES::RVA);
+  }
 
 }
 
