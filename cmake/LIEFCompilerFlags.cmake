@@ -42,11 +42,9 @@ if (MSVC)
   target_compile_options(LIB_LIEF_SHARED PUBLIC /FIiso646.h)
 
   if (CMAKE_BUILD_TYPE MATCHES "Debug")
-    # [port] CHANGED: `/MTd` -> `/MDd`. See [lief-mt].
-    target_compile_options(LIB_LIEF_STATIC PUBLIC /MDd)
+    target_compile_options(LIB_LIEF_STATIC PUBLIC /MTd)
   else()
-    # [port] CHANGED: `/MT` -> `/MD`. See [lief-mt].
-    target_compile_options(LIB_LIEF_STATIC PUBLIC /MD)
+    target_compile_options(LIB_LIEF_STATIC PUBLIC /MT)
   endif()
 
 endif()
