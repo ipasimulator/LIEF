@@ -1,0 +1,8 @@
+[ver:1,total:1320]
+src/MachO/Binary.cpp:360,1549976400:180,1549980000:180,r
+.gitignore:330,1535958000:150,1535961600:180,r
+src/MachO/Relocation.cpp:180,1549980000:180,r
+CMakeLists.txt:180,1536480000:180,r
+src/MachO/Builder.cpp:180,1549929600:180,r
+src/MachO/DyldInfo.cpp:60,1549980000:60,r
+cmake/LIEFCompilerFlags.cmake:30,1535958000:30,m
