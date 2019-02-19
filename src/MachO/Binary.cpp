@@ -207,7 +207,9 @@ it_libraries Binary::libraries(void) {
   libraries_t result;
 
   for (LoadCommand* library: this->commands_) {
-    if (typeid(*library) == typeid(DylibCommand)) {
+    // [port] CHANGED: Added the second part of this condition. See #22.
+    if (typeid(*library) == typeid(DylibCommand) &&
+        library->command() != LOAD_COMMAND_TYPES::LC_ID_DYLIB) {
       result.push_back(dynamic_cast<DylibCommand*>(library));
     }
   }
@@ -219,7 +221,9 @@ it_const_libraries Binary::libraries(void) const {
   libraries_t result;
 
   for (LoadCommand* library: this->commands_) {
-    if (typeid(*library) == typeid(DylibCommand)) {
+    // [port] CHANGED: Added the second part of this condition. See #22.
+    if (typeid(*library) == typeid(DylibCommand) &&
+        library->command() != LOAD_COMMAND_TYPES::LC_ID_DYLIB) {
       result.push_back(dynamic_cast<DylibCommand*>(library));
     }
   }
