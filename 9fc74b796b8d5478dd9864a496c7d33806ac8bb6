@@ -1,0 +1,16 @@
+[ver:1,total:3600]
+src/MachO/BinaryParser.tcc:930,1550660400:570,1550664000:180,1550667600:180,r
+src/MachO/Binary.cpp:420,1550606400:180,1550660400:30,1552309200:210,r
+cmake/LIEFGit.cmake:400,1552370400:400,m
+src/Abstract/Section.cpp:360,1552147200:360,r
+src/MachO/Parser.cpp:250,1552233600:30,1552287600:100,1552291200:120,r
+include/LIEF/MachO/BindingInfo.hpp:240,1551524400:240,r
+include/LIEF/MachO/Binary.hpp:210,1551265200:180,1552233600:30,r
+../../.git/modules/deps/LIEF/COMMIT_EDITMSG:180,1550682000:180,r
+src/MachO/Section.cpp:180,1552147200:180,r
+src/BinaryStream/VectorStream.cpp:180,1552291200:180,r
+include/LIEF/PE/Parser.hpp:150,1552233600:150,r
+include/LIEF/MachO/BinaryParser.hpp:30,1552233600:30,r
+src/MachO/BinaryParser.cpp:30,1552309200:30,r
+include/LIEF/MachO/Parser.hpp:20,1552287600:20,r
+CMakeLists.txt:20,1552370400:20,r
